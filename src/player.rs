@@ -1,3 +1,4 @@
+use bevy::math::f32;
 use bevy::{
     asset::io::gated::GateOpener,
     asset::LoadedFolder,
@@ -6,7 +7,7 @@ use bevy::{
     ecs::query,
     render::texture
 };
-use crate::components::{Player, Velocity, Movable};
+use crate::components::{Player, Velocity, Movable, Direction};
 use crate::{
     GameTextures,
     WinSize, 
@@ -26,9 +27,10 @@ pub struct PlayerPlugin;
 impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {
         app
-        .add_systems(Update, player_spawn_system.run_if(in_state(AppState::InGame)))
+        .add_systems(OnEnter(AppState::InGame), player_spawn_system)
         .add_systems(Update, player_keyboard_event_system.run_if(in_state(AppState::InGame)))
-        .add_systems(Update, player_fire_system.run_if(in_state(AppState::InGame)));
+        .add_systems(Update, player_fire_system.run_if(in_state(AppState::InGame)))
+        .add_systems(Update, change_player_direction_system.run_if(in_state(AppState::InGame)));
     }
 }
 
@@ -52,12 +54,10 @@ fn player_spawn_system(
 ) {
     // Get the window size
     let bottom = -win_size.h / 2.;
-    
-    let player_info = Vec::new();
 
     // Create Player texture atlas
-    for i in 0..game_textures.player.len() {
-        let loaded_foler: &LoadedFolder = loaded_folders.get(game_textures.player[i].id()).unwrap();
+    for i in 0..game_textures.player_folders.len() {
+        let loaded_foler: &LoadedFolder = loaded_folders.get(game_textures.player_folders[i].id()).unwrap();
         let (texture_atlas, texture) = create_texture_atlas(
             loaded_foler,
             None,
@@ -66,81 +66,79 @@ fn player_spawn_system(
         );
         let atlas_handle = texture_atlases.add(texture_atlas);
         game_textures.player_atlas.push(atlas_handle.clone());
-
-        player_info.push(texture);
-        player_info.push(atlas_handle.clone());
-
-        if i == 0 {
-            commands.spawn( SpriteSheetBundle {
-                transform: Transform {
-                    translation: Vec3::new(0., bottom + PLAYER_SIZE.1 / 2., 1.),
-                    ..default()
-                },
-                texture,
-                atlas: TextureAtlas {
-                    index: 1,
-                    layout: atlas_handle
-                },
-                ..default()
-            })
-            .insert(Player)
-            .insert(Velocity { x: 0., y: 0. })
-            .insert(Movable { auto_despawn: false });
-        }
+        game_textures.player_textures.push(texture.clone());
     }
 
-/*
-    // Get texture from TextureAtlasLayout and index
-    let folder = loaded_folders.get(game_textures.player[0].id()).unwrap();
-    let handle = folder.handles[0].clone();
-    let texture_id = handle.id().typed_unchecked::<Image>();
-    let texture = Handle::Weak(texture_id);
-    let atlas_handle = game_textures.player_atlas[0].clone();
-
-    // Spawn the idle sprite
+    // Spawn the player
     commands.spawn( SpriteSheetBundle {
         transform: Transform {
             translation: Vec3::new(0., bottom + PLAYER_SIZE.1 / 2., 0.),
             ..default()
         },
-        texture: texture,
+        texture: game_textures.player_textures[0].clone(),
         atlas: TextureAtlas {
-            index: 2,
-            layout: atlas_handle
+            index: 0,
+            layout: game_textures.player_atlas[0].clone()
         },
-
+        sprite: Sprite {
+            flip_x: false,
+            ..default()
+        },
         ..default()
     })
     .insert(Player)
     .insert(Velocity { x: 0., y: 0. })
-    .insert(Movable { auto_despawn: false });
-*/
+    .insert(Movable { auto_despawn: false })
+    .insert(Direction::Down);
 }
 
 
+// Change the player sprite based on direction
+fn change_player_direction_system(
+    mut query: Query<(&mut TextureAtlas, &Direction), With<Player>>
+) {
+    if let Ok((mut sprite, direction)) = query.get_single_mut() {
+        match direction {
+            Direction::Up => sprite.index = 2,
+            Direction::Down => sprite.index = 1,
+            Direction::Left => sprite.index = 0,
+            Direction::Right => sprite.index = 0
+        }
+    }
+}
 
+// Fire the laser (or swing the weapon, will update later)
 fn player_fire_system(
     mut commands: Commands,
     kb: Res<ButtonInput<KeyCode>>,
     game_textures: Res<GameTextures>,
-    query: Query<&Transform, With<Player>>
+    query: Query<(&Transform, &Direction), With<Player>>
 ) {
-    if let Ok(player_tf) = query.get_single() {
+    if let Ok((player_tf, player_dir)) = query.get_single() {
         if kb.just_pressed(KeyCode::Space) {
             // Get player location
             let (x, y) = (player_tf.translation.x, player_tf.translation.y);
 
-            // Spawn laser at player location
+            // Get player direction
+            let (dx, dy, rot): (f32, f32, f32) = match player_dir {
+                Direction::Up => (0., 1., 0.),
+                Direction::Down => (0., -1., 180.),
+                Direction::Left => (-1., 0., 90.),
+                Direction::Right => (1., 0., -90.),
+            };
+            
+            // Spawn laser at player location with proper direction and velocity
             commands.spawn(SpriteBundle {
                 texture: game_textures.player_laser.clone(),
                 transform: Transform {
                     translation: Vec3::new(x, y, 0.),
+                    rotation: Quat::from_rotation_z(rot.to_radians()),
                     scale: Vec3::new(LASER_SCALE, LASER_SCALE, 0.),
                     ..default()
                 },
                 ..default()
             })
-            .insert(Velocity { x: 0., y: 2. })
+            .insert(Velocity { x: 2. * dx, y: 2. * dy })
             .insert(Movable { auto_despawn: true });
 
         }
@@ -148,23 +146,32 @@ fn player_fire_system(
 
 }
 
-// For every velocity component with the player component, change the velocity based on keyboard input
+
+// For every velocity component and direction component with the player component, 
+// change the velocity and direction based on keyboard input
 fn player_keyboard_event_system(
     kb: Res<ButtonInput<KeyCode>>,
-    mut query: Query<&mut Velocity, With<Player>>
+    mut query: Query<(&mut Velocity, &mut Direction), With<Player>>
 ) {
-    println!("{:?}", kb);
-    if let Ok(mut velocity) = query.get_single_mut() {  // get_single_mut() to get a mutable reference when you know there is ONLY one
-        velocity.x = if kb.pressed(KeyCode::ArrowLeft) {
-            -1.
+    if let Ok((mut velocity, mut direction)) = query.get_single_mut() {  // get_single_mut() to get a mutable reference when you know there is ONLY one
+        if kb.pressed(KeyCode::ArrowLeft) {
+            *direction = Direction::Left;
+            velocity.x = -1.;
         } else if kb.pressed(KeyCode::ArrowRight) {
-            1.
-        } else { 0. };
+            *direction = Direction::Right;
+            velocity.x = 1.;
+        } else {
+            velocity.x = 0.;
+        }
 
-        velocity.y = if kb.pressed(KeyCode::ArrowDown) {
-            -1.
+        if kb.pressed(KeyCode::ArrowDown) {
+            *direction = Direction::Down;
+            velocity.y = -1.;
         } else if kb.pressed(KeyCode::ArrowUp) {
-            1.
-        } else { 0. };
+            *direction = Direction::Up;
+            velocity.y = 1.;
+        } else {
+            velocity.y = 0.;
+        }
     }
 } 

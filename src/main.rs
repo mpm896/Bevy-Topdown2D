@@ -11,7 +11,7 @@ use bevy::{
     transform::commands, 
     ui::update
 };
-use components::{Movable, Velocity};
+use components::{Movable, Velocity, Direction};
 use player::PlayerPlugin;
 
 mod player;
@@ -37,6 +37,7 @@ const MARGIN: f32 = 200.;
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Hash, States)]
 enum AppState {
     #[default]
+    Preload,
     Setup,
     InGame,
     Finished
@@ -51,8 +52,9 @@ pub struct WinSize {
 
 #[derive(Resource, Default)]
 struct GameTextures {  // Instead of needing AssetServer everywhere
-    player: Vec<Handle<LoadedFolder>>,
+    player_folders: Vec<Handle<LoadedFolder>>,
     player_atlas: Vec<Handle<TextureAtlasLayout>>,
+    player_textures: Vec<Handle<Image>>,
     player_laser: Handle<Image>
 }
 
@@ -70,11 +72,11 @@ fn main() {
             ..default()
         }))
         .init_state::<AppState>()
-        .add_systems(OnEnter(AppState::Setup), load_player_sprites)
-        .add_systems(Update, check_textures.run_if(in_state(AppState::Setup)))
-        .add_systems(OnEnter(AppState::InGame), setup)
         .add_plugins(PlayerPlugin)
-        .add_systems(Update, movable_system.run_if(in_state(AppState::InGame)))
+        .add_systems(OnEnter(AppState::Preload), load_player_sprites)
+        .add_systems(Update, check_textures.run_if(in_state(AppState::Preload)))
+        .add_systems(OnEnter(AppState::Setup), setup)
+        .add_systems(Update, (movable_system, sprite_flip_system).run_if(in_state(AppState::InGame)))
         .run();
 }
 
@@ -84,10 +86,7 @@ fn setup(
     mut commands: Commands,
     asset_server: Res<AssetServer>, 
     mut windows: Query<&mut Window>,
-    mut sprite_handles: ResMut<GameTextures>,
-    mut texture_atlases: ResMut<Assets<TextureAtlasLayout>>,
-    loaded_folders: Res<Assets<LoadedFolder>>,
-    mut textures: ResMut<Assets<Image>>
+    mut next_state: ResMut<NextState<AppState>>,
 ) {
     // Spawn the 2d camera
     commands.spawn(Camera2dBundle::default());
@@ -99,6 +98,9 @@ fn setup(
     // Can now insert window size as a resourse
     let win_size = WinSize {w: win_w, h: win_h};
     commands.insert_resource(win_size);  
+
+    // Advance the AppState
+    next_state.set(AppState::InGame);
 }
 
 
@@ -109,7 +111,7 @@ fn load_player_sprites(
 ) {
 
     let game_textures = GameTextures {
-        player: vec![
+        player_folders: vec![
         asset_server.load_folder("tiny-RPG-forest-files/PNG/sprites/hero/idle"),
         asset_server.load_folder("tiny-RPG-forest-files/PNG/sprites/hero/walk/hero-walk-back"),
         asset_server.load_folder("tiny-RPG-forest-files/PNG/sprites/hero/walk/hero-walk-front"),
@@ -164,9 +166,9 @@ fn check_textures(
 ) {
     // Advance the AppState once all the sprite handles have been loaded by the asset server
     for event in events.read() {
-        for rpg_sprite_folder in game_textures.player.iter() {
+        for rpg_sprite_folder in game_textures.player_folders.iter() {
             if event.is_loaded_with_dependencies(rpg_sprite_folder) {
-                next_state.set(AppState::InGame)
+                next_state.set(AppState::Setup)
             }
         }
     }
@@ -202,7 +204,7 @@ fn movable_system(
     win_size: Res<WinSize>,
     mut query: Query<(Entity, &Velocity, &mut Transform, &Movable)>) { // only '&' for read-only access. '&mut' for read-write access
     for (entity, velocity, mut tranform, movable) in query.iter_mut() { // iter_mut() because we're going to mutate the transform
-        let translation = &mut tranform.translation;  // Extract translation from the transform
+        let mut translation = &mut tranform.translation;
         translation.x += velocity.x * TIME_STEP * BASE_SPEED;
         translation.y += velocity.y * TIME_STEP * BASE_SPEED;
 
@@ -213,6 +215,17 @@ fn movable_system(
             || translation.x < -win_size.w / 2. - MARGIN {
                 commands.entity(entity).despawn();
             }
+        }
+    }
+}
+
+fn sprite_flip_system(
+    mut query: Query<(&mut Sprite, &Direction), With<Movable>>
+) {
+    for (mut sprite, direction) in query.iter_mut() {
+        match direction {
+            Direction::Left => sprite.flip_x = true,
+            _ => sprite.flip_x = false
         }
     }
 }

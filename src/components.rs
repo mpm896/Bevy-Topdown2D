@@ -1,7 +1,7 @@
 use bevy::prelude::Component;
 
 // Common components
-#[derive(Component)]
+#[derive(Component, Debug)]
 pub struct Velocity {
     pub x: f32,
     pub y: f32
@@ -13,8 +13,8 @@ pub struct Movable {
     pub auto_despawn: bool
 }
 
-#[derive(Component)]
-enum Direction {
+#[derive(Component, Debug)]
+pub enum Direction {
     Up,
     Down,
     Left,
