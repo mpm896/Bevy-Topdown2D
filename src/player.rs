@@ -7,15 +7,22 @@ use bevy::{
     ecs::query,
     render::texture
 };
-use crate::components::{Player, Velocity, Movable, Direction};
-use crate::{
-    GameTextures,
-    WinSize, 
-    PLAYER_SIZE, 
-    PLAYER_SPRITE_FRONT,
+use crate::components::{
+    Player,
+    Velocity, 
+    Movable, 
+    Direction, 
+    AnimationIndices, 
+    AnimationTimer
+};
+use crate::resources::{WinSize, GameTextures};
+use crate::constants::{
+    PLAYER_SIZE,
     LASER_SCALE,
-    TIME_STEP, 
-    BASE_SPEED,
+    TIME_STEP,
+    BASE_SPEED
+};
+use crate::{
     AppState,
     create_texture_atlas,
     create_sprite_from_atlas,
@@ -30,16 +37,10 @@ impl Plugin for PlayerPlugin {
         .add_systems(OnEnter(AppState::InGame), player_spawn_system)
         .add_systems(Update, player_keyboard_event_system.run_if(in_state(AppState::InGame)))
         .add_systems(Update, player_fire_system.run_if(in_state(AppState::InGame)))
-        .add_systems(Update, change_player_direction_system.run_if(in_state(AppState::InGame)));
+        //.add_systems(Update, change_player_direction_system.run_if(in_state(AppState::InGame)))
+        .add_systems(Update, player_animation_system.run_if(in_state(AppState::InGame)))
+        .add_systems(Update, update_player_animation_texture_system.run_if(in_state(AppState::InGame)));
     }
-}
-
-#[derive(Bundle)]
-pub struct PlayerBundle {
-    pub player: Player,
-    pub idle_sprite: SpriteBundle,
-    pub velocity: Velocity,
-    pub movable: Movable,
 }
 
 
@@ -69,15 +70,18 @@ fn player_spawn_system(
         game_textures.player_textures.push(texture.clone());
     }
 
+    // Create animation indices component
+    let animation_indices = AnimationIndices { first: 0, last: 2 };
+
     // Spawn the player
-    commands.spawn( SpriteSheetBundle {
+    commands.spawn( (SpriteSheetBundle {
         transform: Transform {
             translation: Vec3::new(0., bottom + PLAYER_SIZE.1 / 2., 0.),
             ..default()
         },
         texture: game_textures.player_textures[0].clone(),
         atlas: TextureAtlas {
-            index: 0,
+            index: animation_indices.first,
             layout: game_textures.player_atlas[0].clone()
         },
         sprite: Sprite {
@@ -85,7 +89,10 @@ fn player_spawn_system(
             ..default()
         },
         ..default()
-    })
+    },
+    animation_indices,
+    AnimationTimer(Timer::from_seconds(0.1, TimerMode::Repeating))
+    ))
     .insert(Player)
     .insert(Velocity { x: 0., y: 0. })
     .insert(Movable { auto_despawn: false })
@@ -95,14 +102,119 @@ fn player_spawn_system(
 
 // Change the player sprite based on direction
 fn change_player_direction_system(
-    mut query: Query<(&mut TextureAtlas, &Direction), With<Player>>
+    mut query: Query<(&mut TextureAtlas, &Direction, &Velocity), With<Player>>
 ) {
-    if let Ok((mut sprite, direction)) = query.get_single_mut() {
+    if let Ok((mut sprite, direction, velocity)) = query.get_single_mut() {
+        if velocity.x == 0. && velocity.y == 0. {
+            match direction {
+                Direction::Up => sprite.index = 2,
+                Direction::Down => sprite.index = 1,
+                Direction::Left => sprite.index = 0,
+                Direction::Right => sprite.index = 0
+            }
+        }
+    }
+}
+
+
+// Use animation textures if moving
+fn player_animation_system(
+    time: Res<Time>,
+    mut query: Query<(&AnimationIndices, &mut AnimationTimer, &mut TextureAtlas, &Velocity), With<Player>>
+) {
+    // If velocity is 0, don't animate
+    if let Ok(
+        (indices, mut timer, mut atlas, velocity)
+    ) = query.get_single_mut() {
+        if velocity.x == 0. && velocity.y == 0. {
+            return
+        }
+
+        // Update the timer and index
+        timer.tick(time.delta());
+        if timer.just_finished() {
+            atlas.index = if atlas.index == indices.last {
+                indices.first
+            } else { atlas.index + 1 }
+        }
+    }
+}
+
+
+// Update the TextureAtlasLayout and animation indices depending on direction
+fn update_player_animation_texture_system(
+    mut query: Query<(
+        &mut AnimationIndices, 
+        &mut TextureAtlas, 
+        &mut Handle<Image>, 
+        &Direction,
+        &Velocity
+    ), With<Player>>,
+    mut game_textures: ResMut<GameTextures>,
+    mut texture_atlases: ResMut<Assets<TextureAtlasLayout>>,
+) {
+
+    if let Ok((mut indices, mut atlas, mut image, direction, velocity)) = query.get_single_mut() {
+        let moving: bool = velocity.x != 0. || velocity.y != 0.;
+        let indices_moving = AnimationIndices { first: 0, last: 5 };
         match direction {
-            Direction::Up => sprite.index = 2,
-            Direction::Down => sprite.index = 1,
-            Direction::Left => sprite.index = 0,
-            Direction::Right => sprite.index = 0
+            Direction::Up => {
+                if moving {
+                    if *image == game_textures.player_textures[1].clone() {
+                        return
+                    }
+                    *indices = indices_moving;
+                    *image = game_textures.player_textures[1].clone();
+                    *atlas = TextureAtlas {
+                        index: indices.first,
+                        layout: game_textures.player_atlas[1].clone()
+                    };
+                } else {
+                    *image = game_textures.player_textures[0].clone();
+                    *atlas = TextureAtlas {
+                        index: 2,
+                        layout: game_textures.player_atlas[0].clone()
+                    };
+                }  
+            }
+            Direction::Down => {
+                if moving {
+                    if *image == game_textures.player_textures[2].clone() {
+                        return
+                    }
+                    *indices = indices_moving;
+                    *image = game_textures.player_textures[2].clone();
+                    *atlas = TextureAtlas {
+                        index: indices.first,
+                        layout: game_textures.player_atlas[2].clone()
+                    };
+                } else {
+                    *image = game_textures.player_textures[0].clone();
+                    *atlas = TextureAtlas {
+                        index: 1,
+                        layout: game_textures.player_atlas[0].clone()
+                    };
+                }
+            }
+            _ => {
+                if moving {
+                    if *image == game_textures.player_textures[3].clone() {
+                        return
+                    }
+                    *indices = indices_moving;
+                    *image = game_textures.player_textures[3].clone();
+                    *atlas = TextureAtlas {
+                        index: indices.first,
+                        layout: game_textures.player_atlas[3].clone()
+                    };
+                } else {
+                    *image = game_textures.player_textures[0].clone();
+                    *atlas = TextureAtlas {
+                        index: 0,
+                        layout: game_textures.player_atlas[0].clone()
+                    };
+                }
+            }
         }
     }
 }

@@ -1,4 +1,4 @@
-use bevy::prelude::Component;
+use bevy::prelude::*;
 
 // Common components
 #[derive(Component, Debug)]
@@ -21,6 +21,15 @@ pub enum Direction {
     Right
 }
 
+// Animation components
+#[derive(Component, Debug)]
+pub struct AnimationIndices {
+    pub first: usize,
+    pub last: usize
+}
+
+#[derive(Component, Deref, DerefMut)]
+pub struct AnimationTimer(pub Timer);
 
 #[derive(Component)]
 pub struct Player;  // Just used as a marker

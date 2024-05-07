@@ -12,27 +12,14 @@ use bevy::{
     ui::update
 };
 use components::{Movable, Velocity, Direction};
+use resources::{WinSize, GameTextures, RpgSpriteFolder};
+use constants::*;
 use player::PlayerPlugin;
 
 mod player;
 pub mod components; // Needs to be made public so other files can use it!
-
-// asset constants
-// For assets, bevy already assumes in an 'assets' directory
-const PLAYER_SPRITE_FRONT: &str = "tiny-RPG-forest-files/PNG/sprites/hero/idle/hero-idle-front/hero-idle-front.png";
-const PLAYER_SPRITE_BACK: &str = "tiny-RPG-forest-files/PNG/sprites/hero/idle/hero-idle-back/hero-idle-back.png";
-const PLAYER_SPRITE_SIDE: &str = "tiny-RPG-forest-files/PNG/sprites/hero/idle/hero-idle-side/hero-idle-side.png";
-const PLAYER_SIZE: (f32, f32) = (144., 75.);
-
-const LASER_SPRITE: &str = "laser_a_01.png";
-const LASER_SIZE: (f32, f32) = (9., 54.);
-const LASER_SCALE: f32 = 0.2;
-
-// Game constants
-const TIME_STEP: f32 = 1. / 60.; // 60 fps
-const BASE_SPEED: f32 = 100.;
-const MARGIN: f32 = 200.;
-
+pub mod resources;
+pub mod constants;
 
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Hash, States)]
 enum AppState {
@@ -42,24 +29,6 @@ enum AppState {
     InGame,
     Finished
 }
-
-// Resource
-#[derive(Resource)]
-pub struct WinSize {
-    pub w: f32,
-    pub h: f32
-}
-
-#[derive(Resource, Default)]
-struct GameTextures {  // Instead of needing AssetServer everywhere
-    player_folders: Vec<Handle<LoadedFolder>>,
-    player_atlas: Vec<Handle<TextureAtlasLayout>>,
-    player_textures: Vec<Handle<Image>>,
-    player_laser: Handle<Image>
-}
-
-#[derive(Resource, Debug)]
-struct RpgSpriteFolder(Handle<LoadedFolder>);
 
 
 fn main() {
